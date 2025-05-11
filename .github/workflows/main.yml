@@ -1,0 +1,61 @@
+name: Samsung Firmware Release
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install axios commander fast-xml-parser unzip-stream
+
+      - name: Run Node.js script
+        run: node index.mjs -m SM-A236M -r ARO -i R5CW312KLVM
+
+      - name: Get file path
+        run: |
+          FILE_PATH=$(ls SM-A236M_ARO/AP*)
+          echo "FILE_PATH=$FILE_PATH" >> "$GITHUB_ENV"
+
+      - name: Get file size
+        run: |
+          FILE_SIZE=$(stat -c%s "${{ env.FILE_PATH }}")
+          echo "FILE_SIZE=$FILE_SIZE" >> "$GITHUB_ENV"
+
+      - name: Split large file
+        if: ${{ env.FILE_SIZE >= 2147483648 }}
+        run: |
+          split -b 1G "${{ env.FILE_PATH }}" "${{ env.FILE_PATH }}_part_"
+          rm "${{ env.FILE_PATH }}"
+
+      - name: Get latest firmware version
+        run: |
+          LATEST_VERSION=$(curl -s "http://fota-cloud-dn.ospserver.net/firmware/ARO/SM-A236M/version.xml" | grep -oP "<latest[^>]*>\K[^<]+")
+          echo "LATEST_VERSION=$LATEST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Check if the tag exists
+        run: |
+          if git ls-remote --tags "https://github.com/${{ github.repository }}.git" "${{ env.LATEST_VERSION }}" | grep -q "${{ env.LATEST_VERSION }}"; then
+            echo "TAG_EXISTS=true" >> "$GITHUB_ENV"
+          else
+            echo "TAG_EXISTS=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: GH Release
+        if: ${{ env.TAG_EXISTS == 'false' }}
+        uses: softprops/action-gh-release@v2.2.2
+        with:
+          files: SM-A236M_ARO/*
+          name: ${{ env.LATEST_VERSION }}
+          tag_name: ${{ env.LATEST_VERSION }}
